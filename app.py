@@ -133,8 +133,8 @@ def forecast_paid(models, funnel, spend, quarter):
     # Method 2: Log-Log
     loglog_pred = np.exp(m['loglog'].predict(np.log([[spend]]))[0])
 
-    # Method 3: Recent iROAS (quarter-specific)
-    iroas_pred = m['q_iroas'].get(quarter, m['recent_4q_iroas']) * spend
+    # Method 3: Recent 4-quarter iROAS (reflects current performance levels)
+    iroas_pred = m['recent_4q_iroas'] * spend
 
     # Weighted blend
     weighted = 0.25 * linear_pred + 0.40 * loglog_pred + 0.35 * iroas_pred
