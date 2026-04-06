@@ -16,7 +16,7 @@ st.set_page_config(page_title="LiftLab Revenue Forecaster", layout="wide")
 # =============================================================================
 # DATA LOADING & MODEL TRAINING (cached)
 # =============================================================================
-MODEL_VERSION = 6  # bump to bust Streamlit cache after model changes
+MODEL_VERSION = 7  # bump to bust Streamlit cache after model changes
 
 @st.cache_data(ttl=3600)
 def load_and_train(_version=MODEL_VERSION):
@@ -86,42 +86,23 @@ def load_and_train(_version=MODEL_VERSION):
     unpaid = quarterly[quarterly['Funnel Level'] == 'Unpaid'].sort_values('Quarter').copy()
     unpaid['Quarter_idx'] = range(len(unpaid))
 
-    # Seasonal factors from stable pre-2025 era (unaffected by 2025 dip)
-    pre2025 = unpaid[unpaid['Year'] < 2025]
-    pre2025_avg = pre2025['Revenue'].mean()
+    # Seasonal factors from all complete years (2023-2025)
+    full_years = unpaid[unpaid['Year'].isin([2023, 2024, 2025])]
+    full_years_avg = full_years['Revenue'].mean()
     seasonal_factors = {}
     for q in [1, 2, 3, 4]:
-        q_data = pre2025[pre2025['Q'] == q]['Revenue']
+        q_data = full_years[full_years['Q'] == q]['Revenue']
         if len(q_data) > 0:
-            seasonal_factors[q] = q_data.mean() / pre2025_avg
+            seasonal_factors[q] = q_data.mean() / full_years_avg
         else:
             seasonal_factors[q] = 1.0
 
-    # Recovery trend: 2025Q1 onward shows clear recovery trajectory
-    # Use this to project forward rather than full history which gets
-    # dragged down by the 2025 dip
-    recovery = unpaid[unpaid['Year'] >= 2025].copy()
-    recovery['recovery_idx'] = range(len(recovery))
-    recovery_deseas = recovery.copy()
-    recovery_deseas['deseas_rev'] = recovery_deseas.apply(
-        lambda r: r['Revenue'] / seasonal_factors[r['Q']], axis=1
-    )
-    lr_recovery = LinearRegression().fit(
-        recovery_deseas['recovery_idx'].values.reshape(-1, 1),
-        recovery_deseas['deseas_rev'].values
-    )
+    # Rolling annual baseline: last 4 complete quarters (2025Q2–2026Q1)
+    # This is the most grounded estimate of current annual run rate
+    last_4q = unpaid.tail(4)
+    rolling_annual = last_4q['Revenue'].sum()
 
-    # Full history trend + seasonality (as a secondary signal)
-    unpaid_deseas = unpaid.copy()
-    unpaid_deseas['deseas_rev'] = unpaid_deseas.apply(
-        lambda r: r['Revenue'] / seasonal_factors[r['Q']], axis=1
-    )
-    lr_trend = LinearRegression().fit(
-        unpaid_deseas['Quarter_idx'].values.reshape(-1, 1),
-        unpaid_deseas['deseas_rev'].values
-    )
-
-    # Q1 trend models per quarter
+    # Quarter-specific trend models (all history)
     unpaid_q_trends = {}
     for q in [1, 2, 3, 4]:
         q_data = unpaid[unpaid['Q'] == q]
@@ -132,21 +113,22 @@ def load_and_train(_version=MODEL_VERSION):
             )
             unpaid_q_trends[q] = lr_q
 
-    # CV from recent quarters only (2025+) to avoid mixing eras
-    recent_unpaid = unpaid[unpaid['Year'] >= 2025]
-    recent_unpaid_deseas = recent_unpaid.apply(
+    # Historical annual totals for year-over-year trend
+    annual_totals = full_years.groupby('Year')['Revenue'].sum()
+
+    # CV from quarterly variability across recent full years
+    yearly_q_data = full_years.copy()
+    yearly_q_data['deseas'] = yearly_q_data.apply(
         lambda r: r['Revenue'] / seasonal_factors[r['Q']], axis=1
     )
-    unpaid_cv = recent_unpaid_deseas.std() / recent_unpaid_deseas.mean() if recent_unpaid_deseas.mean() > 0 else 0.15
+    unpaid_cv = yearly_q_data['deseas'].std() / yearly_q_data['deseas'].mean() if yearly_q_data['deseas'].mean() > 0 else 0.15
 
     models['Unpaid'] = {
         'trend': lr_trend,
-        'recovery_trend': lr_recovery,
-        'recovery_start_n': len(recovery),  # number of quarters in recovery set
         'seasonal_factors': seasonal_factors,
+        'rolling_annual': rolling_annual,
+        'annual_totals': annual_totals,
         'q_trends': unpaid_q_trends,
-        'n_quarters': len(unpaid),
-        'last_quarter_idx': len(unpaid) - 1,  # 2026Q1
         'cv': unpaid_cv,
         'historical': unpaid,
     }
@@ -193,28 +175,21 @@ def forecast_unpaid(models, quarter_num, year=2027):
     m = models['Unpaid']
     sf = m['seasonal_factors']
 
-    # Method 1: Recovery trend (2025Q1+) — captures upward trajectory post-dip
-    # Recovery data starts at 2025Q1 (idx 0). 2026Q1 = idx 4.
-    # Target quarter offset from recovery start:
-    quarters_from_2025q1 = (year - 2025) * 4 + (quarter_num - 1)
-    recovery_pred = m['recovery_trend'].predict([[quarters_from_2025q1]])[0] * sf[quarter_num]
+    # Method 1: Rolling annual baseline distributed by seasonal factors
+    # Most grounded — uses last 4 quarters of actual data ($40.2M run rate)
+    sf_total = sum(sf.values())
+    rolling_pred = m['rolling_annual'] * (sf[quarter_num] / sf_total)
 
     # Method 2: Quarter-specific year trend (all history)
     trend_pred = 0
     if quarter_num in m['q_trends']:
-        trend_pred = m['q_trends'][quarter_num].predict([[year]])[0]
+        trend_pred = max(0, m['q_trends'][quarter_num].predict([[year]])[0])
 
-    # Method 3: Full history trend + seasonality (conservative baseline)
-    quarters_from_2026q1 = (year - 2026) * 4 + (quarter_num - 1)
-    target_idx = m['last_quarter_idx'] + quarters_from_2026q1
-    trend_seasonal = m['trend'].predict([[target_idx]])[0] * sf[quarter_num]
-
-    # Weighted blend — recovery trend weighted highest since it reflects
-    # the current trajectory without being dragged down by the 2025 dip
+    # Weighted blend — rolling baseline is the anchor, q-trend captures direction
     if trend_pred > 0:
-        weighted = 0.50 * recovery_pred + 0.30 * trend_pred + 0.20 * trend_seasonal
+        weighted = 0.60 * rolling_pred + 0.40 * trend_pred
     else:
-        weighted = 0.65 * recovery_pred + 0.35 * trend_seasonal
+        weighted = rolling_pred
 
     cv = m['cv']
     return {
@@ -486,13 +461,12 @@ if st.button("Run Forecast", type="primary", use_container_width=True):
         | **Recent iROAS** | 35% | Recent 4-quarter historical iROAS average |
 
         ### Unpaid Channel
-        Three methods are blended (seasonal factors derived from stable pre-2025 era):
+        Two methods are blended:
 
         | Method | Weight | Description |
         |--------|--------|-------------|
-        | **Recovery Trend (2025+)** | 50% | Captures upward trajectory post-2025 dip |
-        | **Quarter-Specific Trend** | 30% | Linear trend on same-quarter historical data |
-        | **Full History Trend + Seasonality** | 20% | Conservative baseline using all data |
+        | **Rolling Annual Baseline** | 60% | Last 4 quarters actual revenue, distributed by seasonal factors |
+        | **Quarter-Specific Trend** | 40% | Linear trend on same-quarter historical data |
 
         ### Confidence Ranges
         Based on the coefficient of variation (CV) of historical iROAS for paid channels,
