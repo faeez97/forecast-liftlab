@@ -39,7 +39,9 @@ def load_and_train():
     # Train models for Upper Funnel and Lower Funnel
     for funnel in ['Upper Funnel', 'Lower Funnel']:
         subset = quarterly[quarterly['Funnel Level'] == funnel].sort_values('Quarter')
-        subset_with_spend = subset[subset['Spend'] > 1000].copy()
+        # Filter to 2025+ spend regime — pre-2025 operated at vastly different
+        # spend levels ($5K-$150K vs $200K-$2.9M) and would distort regressions
+        subset_with_spend = subset[(subset['Spend'] > 1000) & (subset['Year'] >= 2025)].copy()
 
         X = subset_with_spend['Spend'].values.reshape(-1, 1)
         y = subset_with_spend['Revenue'].values
@@ -61,11 +63,9 @@ def load_and_train():
 
         recent_4q_iroas = subset_with_spend.tail(4)['iROAS'].mean()
 
-        # Historical variability for confidence intervals (last 5 quarters only
-        # to reflect current spend regime without mixing in earlier eras)
-        recent_5q = subset_with_spend.tail(5)
-        iroas_std = recent_5q['iROAS'].std()
-        iroas_mean = recent_5q['iROAS'].mean()
+        # Confidence intervals from same 2025+ data
+        iroas_std = subset_with_spend['iROAS'].std()
+        iroas_mean = subset_with_spend['iROAS'].mean()
         cv = iroas_std / iroas_mean if iroas_mean > 0 else 0.2
 
         models[funnel] = {
