@@ -8,7 +8,6 @@ import pandas as pd
 import numpy as np
 from sklearn.linear_model import LinearRegression
 import plotly.graph_objects as go
-import plotly.express as px
 import os
 
 st.set_page_config(page_title="LiftLab Revenue Forecaster", layout="wide")
@@ -16,10 +15,10 @@ st.set_page_config(page_title="LiftLab Revenue Forecaster", layout="wide")
 # =============================================================================
 # DATA LOADING & MODEL TRAINING (cached)
 # =============================================================================
-MODEL_VERSION = 9  # bump to bust Streamlit cache after model changes
+MODEL_VERSION = 10  # bump to bust Streamlit cache after model changes
 
 @st.cache_data(ttl=3600)
-def load_and_train(_version=MODEL_VERSION):
+def load_and_train(version=MODEL_VERSION):
     filepath = os.path.join(os.path.dirname(__file__), 'LL Historical Funnel and Platform.xlsx')
     df = pd.read_excel(filepath)
     df['Quarter'] = df['Day'].dt.to_period('Q')
@@ -54,15 +53,6 @@ def load_and_train(_version=MODEL_VERSION):
         # Log-Log
         lr_log = LinearRegression().fit(np.log(X), np.log(y))
 
-        # Recent iROAS by quarter
-        q_iroas = {}
-        for q in [1, 2, 3, 4]:
-            q_data = subset_with_spend[subset_with_spend['Q'] == q]
-            if len(q_data) > 0:
-                q_iroas[q] = q_data['iROAS'].mean()
-            else:
-                q_iroas[q] = subset_with_spend['iROAS'].mean()
-
         recent_4q_iroas = subset_with_spend.tail(4)['iROAS'].mean()
 
         # Confidence intervals from same 2025+ data
@@ -73,7 +63,6 @@ def load_and_train(_version=MODEL_VERSION):
         models[funnel] = {
             'linear': lr,
             'loglog': lr_log,
-            'q_iroas': q_iroas,
             'recent_4q_iroas': recent_4q_iroas,
             'cv': cv,
             'r2_linear': lr.score(X, y),
@@ -84,7 +73,6 @@ def load_and_train(_version=MODEL_VERSION):
 
     # Unpaid model (time series)
     unpaid = quarterly[quarterly['Funnel Level'] == 'Unpaid'].sort_values('Quarter').copy()
-    unpaid['Quarter_idx'] = range(len(unpaid))
 
     # Seasonal factors from all complete years (2023-2025)
     full_years = unpaid[unpaid['Year'].isin([2023, 2024, 2025])]
@@ -113,9 +101,6 @@ def load_and_train(_version=MODEL_VERSION):
             )
             unpaid_q_trends[q] = lr_q
 
-    # Historical annual totals for year-over-year trend
-    annual_totals = full_years.groupby('Year')['Revenue'].sum()
-
     # CV from quarterly variability across recent full years
     yearly_q_data = full_years.copy()
     yearly_q_data['deseas'] = yearly_q_data.apply(
@@ -126,7 +111,6 @@ def load_and_train(_version=MODEL_VERSION):
     models['Unpaid'] = {
         'seasonal_factors': seasonal_factors,
         'rolling_annual': rolling_annual,
-        'annual_totals': annual_totals,
         'q_trends': unpaid_q_trends,
         'cv': unpaid_cv,
         'historical': unpaid,
@@ -451,13 +435,24 @@ if st.button("Run Forecast", type="primary", use_container_width=True):
     with st.expander("Model Details & Methodology"):
         st.markdown("""
         ### Paid Channels (Upper Funnel & Lower Funnel)
-        Three methods are blended with a weighted average:
+        Three methods are blended. iROAS is capped at 110% of log-log implied rate
+        to prevent extrapolating flat returns at high spend levels.
+
+        **Upper Funnel** (log-log weighted highest due to R²=0.83):
+
+        | Method | Weight | Description |
+        |--------|--------|-------------|
+        | **Linear Regression** | 10% | Spend vs Revenue linear fit |
+        | **Log-Log Regression** | 55% | Captures diminishing returns at higher spend |
+        | **Recent iROAS (capped)** | 35% | Recent 4Q iROAS, capped at 110% of log-log rate |
+
+        **Lower Funnel** (methods converge, standard weights):
 
         | Method | Weight | Description |
         |--------|--------|-------------|
         | **Linear Regression** | 25% | Spend vs Revenue linear fit |
         | **Log-Log Regression** | 40% | Captures diminishing returns at higher spend |
-        | **Recent iROAS** | 35% | Recent 4-quarter historical iROAS average |
+        | **Recent iROAS (capped)** | 35% | Recent 4Q iROAS, capped at 110% of log-log rate |
 
         ### Unpaid Channel
         Two methods are blended:
