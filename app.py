@@ -16,7 +16,7 @@ st.set_page_config(page_title="LiftLab Revenue Forecaster", layout="wide")
 # =============================================================================
 # DATA LOADING & MODEL TRAINING (cached)
 # =============================================================================
-MODEL_VERSION = 7  # bump to bust Streamlit cache after model changes
+MODEL_VERSION = 8  # bump to bust Streamlit cache after model changes
 
 @st.cache_data(ttl=3600)
 def load_and_train(_version=MODEL_VERSION):
@@ -124,7 +124,6 @@ def load_and_train(_version=MODEL_VERSION):
     unpaid_cv = yearly_q_data['deseas'].std() / yearly_q_data['deseas'].mean() if yearly_q_data['deseas'].mean() > 0 else 0.15
 
     models['Unpaid'] = {
-        'trend': lr_trend,
         'seasonal_factors': seasonal_factors,
         'rolling_annual': rolling_annual,
         'annual_totals': annual_totals,
