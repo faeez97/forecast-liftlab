@@ -161,11 +161,19 @@ def forecast_paid(models, funnel, spend, quarter):
     # Method 2: Log-Log
     loglog_pred = np.exp(m['loglog'].predict(np.log([[spend]]))[0])
 
-    # Method 3: Recent 4-quarter iROAS (reflects current performance levels)
-    iroas_pred = m['recent_4q_iroas'] * spend
+    # Method 3: iROAS capped at log-log implied rate — prevents extrapolating
+    # high efficiency from low-spend quarters into high-spend forecasts
+    loglog_iroas = loglog_pred / spend if spend > 0 else 0
+    raw_iroas = m['recent_4q_iroas']
+    capped_iroas = min(raw_iroas, loglog_iroas * 1.10)  # allow 10% above loglog
+    iroas_pred = capped_iroas * spend
 
-    # Weighted blend
-    weighted = 0.25 * linear_pred + 0.40 * loglog_pred + 0.35 * iroas_pred
+    # Upper Funnel: lean on log-log (R²=0.83, captures diminishing returns)
+    # Lower Funnel: methods converge, standard weights are fine
+    if funnel == 'Upper Funnel':
+        weighted = 0.10 * linear_pred + 0.55 * loglog_pred + 0.35 * iroas_pred
+    else:
+        weighted = 0.25 * linear_pred + 0.40 * loglog_pred + 0.35 * iroas_pred
 
     cv = m['cv']
     return {
