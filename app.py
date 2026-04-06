@@ -16,8 +16,10 @@ st.set_page_config(page_title="LiftLab Revenue Forecaster", layout="wide")
 # =============================================================================
 # DATA LOADING & MODEL TRAINING (cached)
 # =============================================================================
-@st.cache_data
-def load_and_train():
+MODEL_VERSION = 6  # bump to bust Streamlit cache after model changes
+
+@st.cache_data(ttl=3600)
+def load_and_train(_version=MODEL_VERSION):
     filepath = os.path.join(os.path.dirname(__file__), 'LL Historical Funnel and Platform.xlsx')
     df = pd.read_excel(filepath)
     df['Quarter'] = df['Day'].dt.to_period('Q')
