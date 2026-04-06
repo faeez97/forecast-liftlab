@@ -16,7 +16,7 @@ st.set_page_config(page_title="LiftLab Revenue Forecaster", layout="wide")
 # =============================================================================
 # DATA LOADING & MODEL TRAINING (cached)
 # =============================================================================
-MODEL_VERSION = 8  # bump to bust Streamlit cache after model changes
+MODEL_VERSION = 9  # bump to bust Streamlit cache after model changes
 
 @st.cache_data(ttl=3600)
 def load_and_train(_version=MODEL_VERSION):
@@ -193,7 +193,7 @@ def forecast_unpaid(models, quarter_num, year=2027):
     cv = m['cv']
     return {
         'trend': max(0, trend_pred),
-        'trend_seasonal': max(0, trend_seasonal),
+        'rolling': max(0, rolling_pred),
         'weighted': max(0, weighted),
         'low': max(0, weighted * (1 - cv)),
         'high': weighted * (1 + cv),
