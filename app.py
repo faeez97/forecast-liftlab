@@ -31,8 +31,8 @@ def load_and_train():
 
     quarterly['iROAS'] = quarterly['Revenue'] / quarterly['Spend'].replace(0, np.nan)
     quarterly['Quarter_str'] = quarterly['Quarter'].astype(str)
-    quarterly['Year'] = quarterly['Quarter'].dt.year
-    quarterly['Q'] = quarterly['Quarter'].dt.quarter
+    quarterly['Year'] = quarterly['Quarter'].apply(lambda x: x.year)
+    quarterly['Q'] = quarterly['Quarter'].apply(lambda x: x.quarter)
 
     models = {}
 
@@ -237,6 +237,7 @@ for i, (col, label) in enumerate(zip(cols, quarter_labels)):
     q = i + 1
     with col:
         st.subheader(label)
+        # Q1 defaults based on Q1 2026 actual spend levels
         spend_inputs[(q, 'Upper Funnel')] = st.number_input(
             f"Upper Funnel Spend",
             min_value=0, value=1_019_420 if q == 1 else 800_000,
