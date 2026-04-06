@@ -61,9 +61,11 @@ def load_and_train():
 
         recent_4q_iroas = subset_with_spend.tail(4)['iROAS'].mean()
 
-        # Historical variability for confidence intervals
-        iroas_std = subset_with_spend['iROAS'].std()
-        iroas_mean = subset_with_spend['iROAS'].mean()
+        # Historical variability for confidence intervals (last 5 quarters only
+        # to reflect current spend regime without mixing in earlier eras)
+        recent_5q = subset_with_spend.tail(5)
+        iroas_std = recent_5q['iROAS'].std()
+        iroas_mean = recent_5q['iROAS'].mean()
         cv = iroas_std / iroas_mean if iroas_mean > 0 else 0.2
 
         models[funnel] = {
@@ -128,8 +130,12 @@ def load_and_train():
             )
             unpaid_q_trends[q] = lr_q
 
-    unpaid_q1_rev = unpaid[unpaid['Q'] == 1]['Revenue'].values
-    unpaid_cv = unpaid_q1_rev.std() / unpaid_q1_rev.mean() if unpaid_q1_rev.mean() > 0 else 0.15
+    # CV from recent quarters only (2025+) to avoid mixing eras
+    recent_unpaid = unpaid[unpaid['Year'] >= 2025]
+    recent_unpaid_deseas = recent_unpaid.apply(
+        lambda r: r['Revenue'] / seasonal_factors[r['Q']], axis=1
+    )
+    unpaid_cv = recent_unpaid_deseas.std() / recent_unpaid_deseas.mean() if recent_unpaid_deseas.mean() > 0 else 0.15
 
     models['Unpaid'] = {
         'trend': lr_trend,
