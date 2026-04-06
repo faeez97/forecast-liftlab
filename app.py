@@ -136,8 +136,8 @@ def forecast_paid(models, funnel, spend, quarter):
     # Method 3: Recent 4-quarter iROAS (reflects current performance levels)
     iroas_pred = m['recent_4q_iroas'] * spend
 
-    # Weighted blend (log-log weighted highest — captures diminishing returns)
-    weighted = 0.15 * linear_pred + 0.55 * loglog_pred + 0.30 * iroas_pred
+    # Weighted blend
+    weighted = 0.25 * linear_pred + 0.40 * loglog_pred + 0.35 * iroas_pred
 
     cv = m['cv']
     return {
@@ -436,9 +436,9 @@ if st.button("Run Forecast", type="primary", use_container_width=True):
 
         | Method | Weight | Description |
         |--------|--------|-------------|
-        | **Linear Regression** | 15% | Spend vs Revenue linear fit |
-        | **Log-Log Regression** | 55% | Captures diminishing returns at higher spend |
-        | **Recent iROAS** | 30% | Recent 4-quarter historical iROAS average |
+        | **Linear Regression** | 25% | Spend vs Revenue linear fit |
+        | **Log-Log Regression** | 40% | Captures diminishing returns at higher spend |
+        | **Recent iROAS** | 35% | Recent 4-quarter historical iROAS average |
 
         ### Unpaid Channel
         Two methods are blended:
